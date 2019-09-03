@@ -1,0 +1,53 @@
+<div class="container">
+    <h1>Add Employee</h1>
+    <form #userForm='ngForm' (ngSubmit)="onSubmit(userForm.value)">
+        <div class="form-group">
+            <label>Employee Name</label>
+            <input id="name" #nameRefff='ngModel' type="text" class="form-control" name="code" pattern="[emp]{3}[0-9]{3}" required minlength="6" maxlength="6" ngModel/>
+            <div *ngIf="nameRefff.errors && (nameRefff.dirty || nameRefff.touched)" required>
+            
+            <div [hidden]="!nameRefff.errors.required">
+            Code is required.
+            </div>
+            <div [hidden]="!nameRefff.errors.minlength">
+            Code must be at least 6 characters long.
+            </div>
+            </div>
+            </div>
+     <div class="form-group">
+        <label>Employee Name</label>
+        <input id="name" #nameRef='ngModel' type="text" class="form-control" name="name" pattern="[A-Z][A-Za-z]{3,}" required minlength="4" ngModel/>
+        <div *ngIf="nameRef.errors && (nameRef.dirty || nameRef.touched)" required>
+        
+        <div [hidden]="!nameRef.errors.required">
+        Name is required.
+        </div>
+        <div [hidden]="!nameRef.errors.minlength">
+        Name must be at least 4 characters long.
+        </div>
+        </div>
+        </div>
+        <div class="form-group">
+            <label>Employee Gender</label>
+            <input id="name" #nameReff='ngModel' type="text" class="form-control" name="gender" pattern="[A-Z][A-Za-z]{3,}" required minlength="4" ngModel/>
+            <div *ngIf="nameReff.errors && (nameReff.dirty || nameReff.touched)" required>
+            
+            <div [hidden]="!nameReff.errors.required">
+            Gender is required.
+            </div>
+            <div [hidden]="!nameReff.errors.minlength">
+            Name must be at least 6 characters long.
+            </div>
+            </div>
+            </div>
+            <div class="form-group">
+                    <label>Employee Salary</label>
+                    <input type="text" class="form-control" name="annualSalary" ngModel/>
+                </div>
+                <div class="form-group">
+                        <label>Employee DOB</label>
+                        <input type="text" class="form-control" name="dateOfBirth" ngModel/>
+                    </div>
+                    <button [disabled]='!userForm.valid' type="submit" class="btn btn-primary">Add Employee</button>
+    </form>
+</div>
