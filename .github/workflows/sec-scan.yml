@@ -61,71 +61,24 @@ jobs:
           fi
 
           mkdir -p buildspec-scan parsed
-
           dirs=()
 
           for f in "${files[@]}"; do
             echo "Found: $f"
 
-            # Extract npm install commands
             installs=$(grep -oP 'npm install[^\n]*' "$f" || true)
-
             if [[ -z "$installs" ]]; then
               continue
             fi
 
-            # Make a unique directory
             base=$(basename "$f")
             scan_dir="buildspec-scan/${base}"
             mkdir -p "$scan_dir"
 
-            # Write a package.json
             echo "{}" > "$scan_dir/package.json"
-
-            # Write the commands file
             echo "$installs" > "parsed/${base}.cmds"
 
             dirs+=("$scan_dir")
           done
 
-          # Create compact JSON for matrix
-          json=$(printf '%s\n' "${dirs[@]}" | jq -R . | jq -s -c .)
-
-          echo "has_dirs=true" >> $GITHUB_OUTPUT
-          echo "scan_dirs=$json" >> $GITHUB_OUTPUT
-
-  # --------------------------------------------------------
-  # 3. Matrix job: Shai-Hulud scan for each buildspec dir
-  # --------------------------------------------------------
-  buildspec-scan:
-    needs: security-scan
-    if: ${{ needs.security-scan.outputs.has_dirs == 'true' }}
-    runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: false
-      matrix:
-        dir: ${{ fromJson(needs.security-scan.outputs.scan_dirs) }}
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies for this buildspec
-        run: |
-          echo "Running npm install commands inside: ${{ matrix.dir }}"
-          cmds_file="parsed/$(basename '${{ matrix.dir }}').cmds"
-          while read cmd; do
-            echo "Running: $cmd"
-            (cd "${{ matrix.dir }}" && eval "$cmd")
-          done < "$cmds_file"
-
-      - name: Shai-Hulud scan for this buildspec
-        uses: gensecaihq/Shai-Hulud-2.0-Detector@v2
-        with:
-          fail-on-critical: true
-          fail-on-high: true
-          fail-on-any: false
-          scan-lockfiles: true
-          scan-node-modules: true
-          output-format: json
-          working-directory: ${{ matrix.dir }}
+          json=$(printf '%s\n' "${dirs[@]}"
