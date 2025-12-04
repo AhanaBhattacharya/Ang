@@ -59,7 +59,7 @@ jobs:
           echo "Found buildspec files:"
           printf '%s\n' "${files[@]}"
 
-          # Convert list to compact JSON array
+          # Compact JSON array (jq-safe)
           json=$(printf '%s\n' "${files[@]}" | jq -R . | jq -s -c .)
 
           echo "found=true" >> "$GITHUB_OUTPUT"
@@ -75,9 +75,8 @@ jobs:
           mkdir -p parsed
 
           echo "Parsing npm install commands..."
-          files='${{ steps.find_buildspecs.outputs.files }}'
 
-          echo "$files" | jq -r '.[]' | while read file; do
+          echo '${{ steps.find_buildspecs.outputs.files }}' | jq -r '.[]' | while read file; do
             echo "Scanning $file ..."
             installs=$(grep -oP 'npm install[^\n]*' "$file" || true)
 
@@ -107,9 +106,9 @@ jobs:
 
             echo "{}" > package.json
 
-            echo "Running install commands from $file:"
+            echo "Executing install commands from $file:"
             while read cmd; do
-              echo "Executing: $cmd"
+              echo "Running: $cmd"
               eval "$cmd"
             done < "../../$file"
 
@@ -117,14 +116,22 @@ jobs:
           done
 
       # --------------------------------------------------------
-      # 5. Scan dependencies from each simulated environment
+      # 5. Install Shai-Hulud CLI so we can run scans in a loop
+      # --------------------------------------------------------
+      - name: Install Shai-Hulud CLI
+        if: ${{ steps.parse_npm.outputs.found_npm == 'true' }}
+        run: |
+          npm install -g @gensecaihq/shai-hulud
+
+      # --------------------------------------------------------
+      # 6. Scan dependencies from each simulated environment
       # --------------------------------------------------------
       - name: Scan dependencies installed from buildspec
         if: ${{ steps.parse_npm.outputs.found_npm == 'true' }}
         run: |
           for scan_dir in buildspec-scan/*; do
             echo "Scanning $scan_dir ..."
-            gensecaihq/Shai-Hulud-2.0-Detector@v2 \
+            shai-hulud \
               --fail-on-critical true \
               --fail-on-high true \
               --fail-on-any false \
