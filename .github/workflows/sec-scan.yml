@@ -46,8 +46,8 @@ jobs:
           mapfile -t files < <(find . -type f \( \
             -name "buildspec.yml" -o \
             -name "buildspec.yaml" -o \
-            -name "*.buildspec.yml" -o \
-            -name "*.buildspec.yaml" \
+            -name "*-buildspec.yml" -o \
+            -name "*-buildspec.yaml" \
           \))
 
           if (( ${#files[@]} == 0 )); then
