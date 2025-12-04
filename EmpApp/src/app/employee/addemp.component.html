@@ -2,7 +2,7 @@
     <h1>Add Employee</h1>
     <form #userForm='ngForm' (ngSubmit)="onSubmit(userForm.value)">
         <div class="form-group">
-            <label>Employee Name</label>
+            <label>Employee Namety</label>
             <input id="name" #nameRefff='ngModel' type="text" class="form-control" name="code" pattern="[emp]{3}[0-9]{3}" required minlength="6" maxlength="6" ngModel/>
             <div *ngIf="nameRefff.errors && (nameRefff.dirty || nameRefff.touched)" required>
             
