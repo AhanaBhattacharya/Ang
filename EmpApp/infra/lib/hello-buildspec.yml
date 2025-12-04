@@ -1,0 +1,15 @@
+version: 0.2
+
+phases:
+  install:
+    commands:
+      - echo "Installing XLSX npm package..."
+      - npm init -y
+      - npm install xlsx
+  build:
+    commands:
+      - echo "XLSX package installed!"
+
+artifacts:
+  files:
+    - node_modules/**/*
