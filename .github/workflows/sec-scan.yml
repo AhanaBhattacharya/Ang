@@ -58,11 +58,18 @@ jobs:
           fi
 
           printf "%s\n" "${files[@]}"
-
+          
+          echo "found=true" >> "$GITHUB_OUTPUT"
           json=$(printf '%s\n' "${files[@]}" | jq -R . | jq -s .)
 
           echo "found=true" >> "$GITHUB_OUTPUT"
-          echo "files=$json" >> "$GITHUB_OUTPUT"
+
+          # ---- Multi-line output (Safe for JSON) ----
+          {
+            echo "files<<EOF"
+            echo "$json"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------------
       # 3. Extract npm install commands from each buildspec file
