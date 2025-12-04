@@ -4,18 +4,28 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+
 permissions:
-  contents : read
-  pull-requests : write
+  contents: read
+  pull-requests: write
+
 concurrency:
   group: security-scan-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
+
 jobs:
   security-scan:
     runs-on: ubuntu-latest
+
     steps:
-      - uses : actions/checkout@v6
-      - uses : gensecaihq/Shai-Hulud-2.0-Detector@v2
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ----------------------------
+      # 1. Scan normal dependencies
+      # ----------------------------
+      - name: Run Shai-Hulud scan on repo
+        uses: gensecaihq/Shai-Hulud-2.0-Detector@v2
         with:
           fail-on-critical: true
           fail-on-high: true
@@ -24,3 +34,92 @@ jobs:
           scan-node-modules: false
           output-format: json
           working-directory: '.'
+
+      # ---------------------------------------------------
+      # 2. Find ALL buildspec files recursively in project
+      # ---------------------------------------------------
+      - name: Find all buildspec files
+        id: find_buildspecs
+        run: |
+          echo "Searching for buildspec files..."
+          files=$(find . -type f \( \
+            -name "buildspec.yml" -o \
+            -name "buildspec.yaml" -o \
+            -name "*.buildspec.yml" -o \
+            -name "*.buildspec.yaml" \
+          \))
+
+          echo "Found files:"
+          echo "$files"
+
+          files_json=$(printf '%s\n' "$files" | jq -R . | jq -s .)
+          echo "files=$files_json" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------
+      # 3. Extract npm install commands from each buildspec
+      # ---------------------------------------------------
+      - name: Parse npm install commands from each buildspec
+        id: parse
+        run: |
+          files=${{ steps.find_buildspecs.outputs.files }}
+
+          echo "$files" | jq -r '.[]' | while read file; do
+            echo "Checking $file ..."
+
+            installs=$(grep -oP 'npm install[^\n]*' "$file" || true)
+
+            if [[ -n "$installs" ]]; then
+              echo "Found install commands in $file:"
+              echo "$installs"
+              mkdir -p parsed
+              printf "%s\n" "$installs" > "parsed/$(basename "$file").cmds"
+            fi
+          done
+
+          if ls parsed/*.cmds >/dev/null 2>&1; then
+            echo "found_cmd_sets=true" >> $GITHUB_OUTPUT
+          else
+            echo "found_cmd_sets=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ---------------------------------------------------
+      # 4. Simulate npm installs for every buildspec file
+      # ---------------------------------------------------
+      - name: Run installs for each buildspec
+        if: ${{ steps.parse.outputs.found_cmd_sets == 'true' }}
+        run: |
+          mkdir buildspec-scan
+
+          for cmds_file in parsed/*.cmds; do
+            dir="buildspec-scan/$(basename "$cmds_file")"
+            mkdir -p "$dir"
+            cd "$dir"
+
+            echo "{}" > package.json
+            echo "Running installs from $cmds_file:"
+            while read cmd; do
+              echo "Executing: $cmd"
+              eval "$cmd"
+            done < "../../$cmds_file"
+
+            cd ../../
+          done
+
+      # ---------------------------------------------------
+      # 5. Run Shai-Hulud scan on each simulated environment
+      # ---------------------------------------------------
+      - name: Scan dependencies from buildspec installs
+        if: ${{ steps.parse.outputs.found_cmd_sets == 'true' }}
+        run: |
+          for scan_dir in buildspec-scan/*; do
+            echo "Scanning: $scan_dir"
+
+            gensecaihq/Shai-Hulud-2.0-Detector@v2 \
+              --fail-on-critical true \
+              --fail-on-high true \
+              --fail-on-any false \
+              --scan-lockfiles true \
+              --scan-node-modules true \
+              --output-format json \
+              --working-directory "$scan_dir"
+          done
