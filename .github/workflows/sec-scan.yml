@@ -17,14 +17,18 @@ jobs:
   security-scan:
     runs-on: ubuntu-latest
 
+    outputs:
+      scan_dirs: ${{ steps.collect.outputs.scan_dirs }}
+      has_dirs: ${{ steps.collect.outputs.has_dirs }}
+
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       # ----------------------------
-      # 1. Scan normal dependencies
+      # 1. Scan repo dependencies
       # ----------------------------
-      - name: Run Shai-Hulud scan on repo
+      - name: Shai-Hulud scan on repo
         uses: gensecaihq/Shai-Hulud-2.0-Detector@v2
         with:
           fail-on-critical: true
@@ -36,12 +40,12 @@ jobs:
           working-directory: '.'
 
       # --------------------------------------------------------
-      # 2. Find ALL buildspec (.yml/.yaml) files recursively
+      # 2. Find and parse buildspec files
       # --------------------------------------------------------
-      - name: Find all buildspec files
-        id: find_buildspecs
+      - name: Collect buildspec scan directories
+        id: collect
         run: |
-          echo "Searching for buildspec files in the repo..."
+          echo "Searching for buildspec files..."
 
           mapfile -t files < <(find . -type f \( \
             -name "buildspec.yml" -o \
@@ -51,92 +55,77 @@ jobs:
           \))
 
           if (( ${#files[@]} == 0 )); then
-            echo "found=false" >> "$GITHUB_OUTPUT"
-            echo "files=[]" >> "$GITHUB_OUTPUT"
+            echo "has_dirs=false" >> $GITHUB_OUTPUT
+            echo "scan_dirs=[]" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "Found buildspec files:"
-          printf '%s\n' "${files[@]}"
+          mkdir -p buildspec-scan parsed
 
-          # Compact JSON array (jq-safe)
-          json=$(printf '%s\n' "${files[@]}" | jq -R . | jq -s -c .)
+          dirs=()
 
-          echo "found=true" >> "$GITHUB_OUTPUT"
-          echo "files=$json" >> "$GITHUB_OUTPUT"
+          for f in "${files[@]}"; do
+            echo "Found: $f"
 
-      # --------------------------------------------------------
-      # 3. Extract npm install commands from each buildspec file
-      # --------------------------------------------------------
-      - name: Parse npm install commands
-        id: parse_npm
-        if: ${{ steps.find_buildspecs.outputs.found == 'true' }}
-        run: |
-          mkdir -p parsed
+            # Extract npm install commands
+            installs=$(grep -oP 'npm install[^\n]*' "$f" || true)
 
-          echo "Parsing npm install commands..."
-
-          echo '${{ steps.find_buildspecs.outputs.files }}' | jq -r '.[]' | while read file; do
-            echo "Scanning $file ..."
-            installs=$(grep -oP 'npm install[^\n]*' "$file" || true)
-
-            if [[ -n "$installs" ]]; then
-              echo "$installs" > "parsed/$(basename "$file").cmds"
+            if [[ -z "$installs" ]]; then
+              continue
             fi
+
+            # Make a unique directory
+            base=$(basename "$f")
+            scan_dir="buildspec-scan/${base}"
+            mkdir -p "$scan_dir"
+
+            # Write a package.json
+            echo "{}" > "$scan_dir/package.json"
+
+            # Write the commands file
+            echo "$installs" > "parsed/${base}.cmds"
+
+            dirs+=("$scan_dir")
           done
 
-          if ls parsed/*.cmds >/dev/null 2>&1; then
-            echo "found_npm=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "found_npm=false" >> "$GITHUB_OUTPUT"
-          fi
+          # Create compact JSON for matrix
+          json=$(printf '%s\n' "${dirs[@]}" | jq -R . | jq -s -c .)
 
-      # --------------------------------------------------------
-      # 4. Simulate npm installs for every buildspec file found
-      # --------------------------------------------------------
-      - name: Run npm installs from buildspec files
-        if: ${{ steps.parse_npm.outputs.found_npm == 'true' }}
+          echo "has_dirs=true" >> $GITHUB_OUTPUT
+          echo "scan_dirs=$json" >> $GITHUB_OUTPUT
+
+  # --------------------------------------------------------
+  # 3. Matrix job: Shai-Hulud scan for each buildspec dir
+  # --------------------------------------------------------
+  buildspec-scan:
+    needs: security-scan
+    if: ${{ needs.security-scan.outputs.has_dirs == 'true' }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.security-scan.outputs.scan_dirs) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies for this buildspec
         run: |
-          mkdir -p buildspec-scan
+          echo "Running npm install commands inside: ${{ matrix.dir }}"
+          cmds_file="parsed/$(basename '${{ matrix.dir }}').cmds"
+          while read cmd; do
+            echo "Running: $cmd"
+            (cd "${{ matrix.dir }}" && eval "$cmd")
+          done < "$cmds_file"
 
-          for file in parsed/*.cmds; do
-            dir="buildspec-scan/$(basename "$file")"
-            mkdir -p "$dir"
-            cd "$dir"
-
-            echo "{}" > package.json
-
-            echo "Executing install commands from $file:"
-            while read cmd; do
-              echo "Running: $cmd"
-              eval "$cmd"
-            done < "../../$file"
-
-            cd ../../
-          done
-
-      # --------------------------------------------------------
-      # 5. Install Shai-Hulud CLI so we can run scans in a loop
-      # --------------------------------------------------------
-      - name: Install Shai-Hulud CLI
-        if: ${{ steps.parse_npm.outputs.found_npm == 'true' }}
-        run: |
-          npm install -g @gensecaihq/shai-hulud
-
-      # --------------------------------------------------------
-      # 6. Scan dependencies from each simulated environment
-      # --------------------------------------------------------
-      - name: Scan dependencies installed from buildspec
-        if: ${{ steps.parse_npm.outputs.found_npm == 'true' }}
-        run: |
-          for scan_dir in buildspec-scan/*; do
-            echo "Scanning $scan_dir ..."
-            shai-hulud \
-              --fail-on-critical true \
-              --fail-on-high true \
-              --fail-on-any false \
-              --scan-lockfiles true \
-              --scan-node-modules true \
-              --output-format json \
-              --working-directory "$scan_dir"
-          done
+      - name: Shai-Hulud scan for this buildspec
+        uses: gensecaihq/Shai-Hulud-2.0-Detector@v2
+        with:
+          fail-on-critical: true
+          fail-on-high: true
+          fail-on-any: false
+          scan-lockfiles: true
+          scan-node-modules: true
+          output-format: json
+          working-directory: ${{ matrix.dir }}
