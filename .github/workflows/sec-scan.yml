@@ -41,7 +41,7 @@ jobs:
       - name: Find all buildspec files
         id: find_buildspecs
         run: |
-          echo "Searching for buildspec files in entire repo..."
+          echo "Searching for buildspec files in the repo..."
 
           mapfile -t files < <(find . -type f \( \
             -name "buildspec.yml" -o \
@@ -53,23 +53,17 @@ jobs:
           if (( ${#files[@]} == 0 )); then
             echo "found=false" >> "$GITHUB_OUTPUT"
             echo "files=[]" >> "$GITHUB_OUTPUT"
-            echo "No buildspec files found."
             exit 0
           fi
 
-          printf "%s\n" "${files[@]}"
-          
-          echo "found=true" >> "$GITHUB_OUTPUT"
-          json=$(printf '%s\n' "${files[@]}" | jq -R . | jq -s .)
+          echo "Found buildspec files:"
+          printf '%s\n' "${files[@]}"
+
+          # Convert list to compact JSON array
+          json=$(printf '%s\n' "${files[@]}" | jq -R . | jq -s -c .)
 
           echo "found=true" >> "$GITHUB_OUTPUT"
-
-          # ---- Multi-line output (Safe for JSON) ----
-          {
-            echo "files<<EOF"
-            echo "$json"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          echo "files=$json" >> "$GITHUB_OUTPUT"
 
       # --------------------------------------------------------
       # 3. Extract npm install commands from each buildspec file
@@ -80,10 +74,13 @@ jobs:
         run: |
           mkdir -p parsed
 
-          echo "${{ steps.find_buildspecs.outputs.files }}" | jq -r '.[]' | while read file; do
-            echo "Scanning $file for npm install commands..."
+          echo "Parsing npm install commands..."
+          files='${{ steps.find_buildspecs.outputs.files }}'
 
+          echo "$files" | jq -r '.[]' | while read file; do
+            echo "Scanning $file ..."
             installs=$(grep -oP 'npm install[^\n]*' "$file" || true)
+
             if [[ -n "$installs" ]]; then
               echo "$installs" > "parsed/$(basename "$file").cmds"
             fi
@@ -110,9 +107,9 @@ jobs:
 
             echo "{}" > package.json
 
-            echo "Executing install commands in $file:"
+            echo "Running install commands from $file:"
             while read cmd; do
-              echo "Running: $cmd"
+              echo "Executing: $cmd"
               eval "$cmd"
             done < "../../$file"
 
@@ -136,4 +133,3 @@ jobs:
               --output-format json \
               --working-directory "$scan_dir"
           done
-
